@@ -1,0 +1,25 @@
+
+# Secrets and Environment
+.env
+.env.*
+
+# Virtual Environments
+.venv/
+.venv-312/
+venv/
+env/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Databases & Vector Stores
+chroma_db/
+*.db
+*.sqlite3
+
+# macOS & VS Code
+.DS_Store
+.vscode/
+
