@@ -1,9 +1,12 @@
 import os
 import tempfile
-from langchain_community.document_loaders import TextLoader, PyPDFLoader
+from langchain_core.documents import Document
+from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
+
 from config import CHUNK_SIZE, CHUNK_OVERLAP
+from services.ocr_service import extract_text_from_file
 
 
 class PolicyRepository:
@@ -13,7 +16,7 @@ class PolicyRepository:
         self.initial_policy_file = initial_policy_file
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP
+            chunk_overlap=CHUNK_OVERLAP,
         )
         self.db = self._load_or_initialize_db()
 
@@ -21,39 +24,41 @@ class PolicyRepository:
         if os.path.exists(self.persist_dir) and os.listdir(self.persist_dir):
             return Chroma(
                 persist_directory=self.persist_dir,
-                embedding_function=self.embedding_function
+                embedding_function=self.embedding_function,
             )
 
-        loader = TextLoader(self.initial_policy_file)
-        documents = loader.load()
+        documents = TextLoader(self.initial_policy_file).load()
         chunks = self.splitter.split_documents(documents)
 
         return Chroma.from_documents(
             documents=chunks,
             embedding=self.embedding_function,
-            persist_directory=self.persist_dir
+            persist_directory=self.persist_dir,
         )
 
     def search_relevant_policies(self, query: str, k: int = 3) -> str:
-        retriever = self.db.as_retriever(search_kwargs={"k": k})
-        matching_docs = retriever.invoke(query)
+        matching_docs = self.db.similarity_search(query, k=k)
+        if not matching_docs:
+            return "No matching policy found."
         return "\n\n".join(doc.page_content for doc in matching_docs)
 
     def index_uploaded_file(self, file_name: str, file_bytes: bytes) -> int:
-        suffix = os.path.splitext(file_name)[1].lower()
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        """Save uploaded file temporarily, extract text (with OCR), and save to ChromaDB."""
+        extension = os.path.splitext(file_name)[1].lower()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp_file:
             tmp_file.write(file_bytes)
             tmp_path = tmp_file.name
 
         try:
-            loader = PyPDFLoader(tmp_path) if suffix == ".pdf" else TextLoader(tmp_path)
-            documents = loader.load()
-            chunks = self.splitter.split_documents(documents)
+            # Step 1: Extract text using our OCR helper
+            text = extract_text_from_file(tmp_path)
+            if not text:
+                return 0
 
-            for chunk in chunks:
-                chunk.metadata["source"] = file_name
-
+            # Step 2: Split text into chunks and save in ChromaDB
+            doc = Document(page_content=text, metadata={"source": file_name})
+            chunks = self.splitter.split_documents([doc])
             self.db.add_documents(chunks)
             return len(chunks)
         finally:

@@ -29,6 +29,18 @@ class EmployeeRepository:
             """)
             conn.commit()
 
+    def _row_to_employee(self, row: sqlite3.Row) -> Employee:
+        """Helper to convert a database row into an Employee object."""
+        return Employee(
+            emp_id=row["emp_id"],
+            name=row["name"],
+            role=row["role"],
+            location=row["location"],
+            pto_balance=row["pto_balance"],
+            sick_leave_balance=row["sick_leave_balance"],
+            manager=row["manager"],
+        )
+
     def count_employees(self) -> int:
         with self._get_connection() as conn:
             row = conn.execute("SELECT COUNT(*) as count FROM employees").fetchone()
@@ -43,25 +55,28 @@ class EmployeeRepository:
         location: str,
         pto_balance: int = 24,
         sick_leave_balance: int = 10,
-        manager: str = "HR Admin"
+        manager: str = "HR Admin",
     ) -> bool:
         try:
             with self._get_connection() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO employees (
                         emp_id, password_hash, name, role, location,
                         pto_balance, sick_leave_balance, manager
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    emp_id.strip().upper(),
-                    password_hash,
-                    name.strip(),
-                    role.strip(),
-                    location.strip(),
-                    pto_balance,
-                    sick_leave_balance,
-                    manager
-                ))
+                    """,
+                    (
+                        emp_id.strip().upper(),
+                        password_hash,
+                        name.strip(),
+                        role.strip(),
+                        location.strip(),
+                        pto_balance,
+                        sick_leave_balance,
+                        manager,
+                    ),
+                )
                 conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -71,18 +86,56 @@ class EmployeeRepository:
         with self._get_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM employees WHERE emp_id = ? AND password_hash = ?",
-                (emp_id.strip().upper(), password_hash)
+                (emp_id.strip().upper(), password_hash),
             ).fetchone()
 
-        if not row:
-            return None
+        return self._row_to_employee(row) if row else None
 
-        return Employee(
-            emp_id=row["emp_id"],
-            name=row["name"],
-            role=row["role"],
-            location=row["location"],
-            pto_balance=row["pto_balance"],
-            sick_leave_balance=row["sick_leave_balance"],
-            manager=row["manager"]
-        )
+    # --- NEW METHODS FOR YOUR AI AGENT ---
+
+    def get_employee_by_id(self, emp_id: str) -> Optional[Employee]:
+        """Fetch the latest employee details and leave balances."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM employees WHERE emp_id = ?",
+                (emp_id.strip().upper(),),
+            ).fetchone()
+
+        return self._row_to_employee(row) if row else None
+
+    def apply_leave(self, emp_id: str, leave_type: str, days: int) -> str:
+        """Deduct PTO or Sick leave days and return a clear status message for the AI."""
+        emp_id = emp_id.strip().upper()
+        clean_type = leave_type.strip().lower()
+
+        if clean_type == "pto":
+            column = "pto_balance"
+            label = "PTO"
+        elif clean_type in ("sick", "sick leave"):
+            column = "sick_leave_balance"
+            label = "Sick Leave"
+        else:
+            return "Invalid leave type. Please choose either 'PTO' or 'Sick'."
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                f"SELECT {column} FROM employees WHERE emp_id = ?", (emp_id,)
+            ).fetchone()
+
+            if not row:
+                return "Employee record not found."
+
+            current_balance = row[column]
+            if days <= 0:
+                return "Number of leave days must be at least 1."
+            if days > current_balance:
+                return f"Insufficient {label} balance. Available: {current_balance} days."
+
+            new_balance = current_balance - days
+            conn.execute(
+                f"UPDATE employees SET {column} = ? WHERE emp_id = ?",
+                (new_balance, emp_id),
+            )
+            conn.commit()
+
+        return f"Approved! Deducted {days} day(s) from {label}. Remaining balance: {new_balance} days."
