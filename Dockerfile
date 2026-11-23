@@ -8,9 +8,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install Python dependencies with extended timeout protection
+# Install Python dependencies using pre-built binary wheels for faster builds
 COPY requirements.txt .
-RUN pip install --default-timeout=1000 --retries 10 --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --prefer-binary --default-timeout=1000 --retries 10 --no-cache-dir -r requirements.txt
 
 # Copy project files
 COPY . .
