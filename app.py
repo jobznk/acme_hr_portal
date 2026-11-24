@@ -1,33 +1,15 @@
 import os
 import streamlit as st
-#from langchain_ollama import OllamaEmbeddings, ChatOllama
-
 from langchain_groq import ChatGroq
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
-#from langchain_ollama import ChatOllama
-
 from config import (
     COMPANY_NAME,
     POLICY_FILE,
-    CHROMA_DB_FOLDER,
-    SQL_DB_FILE,
+    DATABASE_URL,
     EMBEDDING_MODEL,
-    CHAT_MODEL,
-    OLLAMA_BASE_URL,
     GROQ_API_KEY,
     GROQ_MODEL,
-)
-
-
-from config import (
-    COMPANY_NAME,
-    POLICY_FILE,
-    CHROMA_DB_FOLDER,
-    SQL_DB_FILE,
-    EMBEDDING_MODEL,
-    CHAT_MODEL,
-    OLLAMA_BASE_URL,
 )
 from models import Employee
 from repositories.employee_repo import EmployeeRepository
@@ -40,8 +22,7 @@ st.set_page_config(page_title=f"{COMPANY_NAME} HR Assistant", page_icon="🏢", 
 
 @st.cache_resource
 def get_auth_service() -> AuthService:
-    return AuthService(employee_repo=EmployeeRepository(db_path=SQL_DB_FILE))
-
+    return AuthService(employee_repo=EmployeeRepository(db_url=DATABASE_URL))
 
 
 @st.cache_resource(show_spinner=False)
@@ -49,9 +30,9 @@ def get_chat_service() -> HRChatService:
     embeddings = FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)
     llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, temperature=0)
 
-    employee_repo = EmployeeRepository(db_path=SQL_DB_FILE)
+    employee_repo = EmployeeRepository(db_url=DATABASE_URL)
     policy_repo = PolicyRepository(
-        persist_dir=CHROMA_DB_FOLDER,
+        db_url=DATABASE_URL,
         embedding_function=embeddings,
         initial_policy_file=POLICY_FILE,
     )
@@ -60,8 +41,6 @@ def get_chat_service() -> HRChatService:
         employee_repo=employee_repo,
         llm=llm,
     )
-
-
 
 
 def render_login_page(auth_service: AuthService) -> None:
@@ -162,7 +141,6 @@ def render_chat_portal(auth_service: AuthService, chat_service: HRChatService) -
 
         st.session_state["messages"].append({"role": "assistant", "content": response})
         st.rerun()
-
 
 
 def main() -> None:

@@ -1,141 +1,136 @@
-import sqlite3
-from typing import Optional
+from psycopg_pool import ConnectionPool
 from models import Employee
 
 
 class EmployeeRepository:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self._init_table()
+    def __init__(self, db_url: str):
+        clean_url = db_url.replace("postgresql+psycopg://", "postgresql://")
+        self.pool = ConnectionPool(clean_url, min_size=1, max_size=10)
+        self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self):
+        return self.pool.connection()
 
-    def _init_table(self) -> None:
-        with self._get_connection() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS employees (
-                    emp_id TEXT PRIMARY KEY,
-                    password_hash TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    location TEXT NOT NULL,
-                    pto_balance INTEGER NOT NULL,
-                    sick_leave_balance INTEGER NOT NULL,
-                    manager TEXT NOT NULL
-                )
-            """)
+    def _init_db(self):
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS employees (
+                        emp_id TEXT PRIMARY KEY,
+                        password TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        location TEXT NOT NULL,
+                        pto_balance INTEGER NOT NULL,
+                        sick_leave_balance INTEGER NOT NULL,
+                        manager TEXT NOT NULL
+                    )
+                """)
             conn.commit()
 
-    def _row_to_employee(self, row: sqlite3.Row) -> Employee:
-        """Helper to convert a database row into an Employee object."""
+    def count_employees(self) -> int:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM employees")
+                row = cur.fetchone()
+                return row[0] if row else 0
+
+    def _row_to_employee(self, row) -> Employee:
+        emp_id, _password, name, role, location, pto_balance, sick_leave_balance, manager = row
         return Employee(
-            emp_id=row["emp_id"],
-            name=row["name"],
-            role=row["role"],
-            location=row["location"],
-            pto_balance=row["pto_balance"],
-            sick_leave_balance=row["sick_leave_balance"],
-            manager=row["manager"],
+            emp_id=emp_id,
+            name=name,
+            role=role,
+            location=location,
+            pto_balance=pto_balance,
+            sick_leave_balance=sick_leave_balance,
+            manager=manager,
         )
 
-    def count_employees(self) -> int:
-        with self._get_connection() as conn:
-            row = conn.execute("SELECT COUNT(*) as count FROM employees").fetchone()
-            return row["count"]
+    def get_employee_by_id(self, emp_id: str) -> Employee | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT emp_id, password, name, role, location, pto_balance, sick_leave_balance, manager
+                    FROM employees WHERE emp_id = %s
+                    """,
+                    (emp_id.upper(),),
+                )
+                row = cur.fetchone()
+                return self._row_to_employee(row) if row else None
+
+    def find_by_credentials(self, emp_id: str, hashed_password: str) -> Employee | None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT emp_id, password, name, role, location, pto_balance, sick_leave_balance, manager
+                    FROM employees WHERE emp_id = %s AND password = %s
+                    """,
+                    (emp_id.upper(), hashed_password),
+                )
+                row = cur.fetchone()
+                return self._row_to_employee(row) if row else None
 
     def create_employee(
         self,
         emp_id: str,
-        password_hash: str,
+        password: str,
         name: str,
         role: str,
         location: str,
-        pto_balance: int = 24,
+        pto_balance: int = 20,
         sick_leave_balance: int = 10,
-        manager: str = "HR Admin",
-    ) -> bool:
-        try:
-            with self._get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO employees (
-                        emp_id, password_hash, name, role, location,
-                        pto_balance, sick_leave_balance, manager
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
+        manager: str = "HR Operations",
+    ) -> Employee:
+        clean_id = emp_id.upper()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO employees VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                     (
-                        emp_id.strip().upper(),
-                        password_hash,
-                        name.strip(),
-                        role.strip(),
-                        location.strip(),
+                        clean_id,
+                        password,
+                        name,
+                        role,
+                        location,
                         pto_balance,
                         sick_leave_balance,
                         manager,
                     ),
                 )
-                conn.commit()
-            return True
-        except sqlite3.IntegrityError:
-            return False
+            conn.commit()
+        return Employee(
+            emp_id=clean_id,
+            name=name,
+            role=role,
+            location=location,
+            pto_balance=pto_balance,
+            sick_leave_balance=sick_leave_balance,
+            manager=manager,
+        )
 
-    def find_by_credentials(self, emp_id: str, password_hash: str) -> Optional[Employee]:
-        with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM employees WHERE emp_id = ? AND password_hash = ?",
-                (emp_id.strip().upper(), password_hash),
-            ).fetchone()
-
-        return self._row_to_employee(row) if row else None
-
-    # --- NEW METHODS FOR YOUR AI AGENT ---
-
-    def get_employee_by_id(self, emp_id: str) -> Optional[Employee]:
-        """Fetch the latest employee details and leave balances."""
-        with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM employees WHERE emp_id = ?",
-                (emp_id.strip().upper(),),
-            ).fetchone()
-
-        return self._row_to_employee(row) if row else None
 
     def apply_leave(self, emp_id: str, leave_type: str, days: int) -> str:
-        """Deduct PTO or Sick leave days and return a clear status message for the AI."""
-        emp_id = emp_id.strip().upper()
-        clean_type = leave_type.strip().lower()
+        emp = self.get_employee_by_id(emp_id)
+        if not emp:
+            return f"Employee {emp_id} not found."
 
-        if clean_type == "pto":
-            column = "pto_balance"
-            label = "PTO"
-        elif clean_type in ("sick", "sick leave"):
-            column = "sick_leave_balance"
-            label = "Sick Leave"
-        else:
-            return "Invalid leave type. Please choose either 'PTO' or 'Sick'."
+        col = "pto_balance" if leave_type.lower() == "pto" else "sick_leave_balance"
+        current = emp.pto_balance if col == "pto_balance" else emp.sick_leave_balance
 
-        with self._get_connection() as conn:
-            row = conn.execute(
-                f"SELECT {column} FROM employees WHERE emp_id = ?", (emp_id,)
-            ).fetchone()
+        if days <= 0:
+            return "Leave days must be at least 1."
+        if current < days:
+            return f"Insufficient {leave_type} balance. Available: {current} days, Requested: {days} days."
 
-            if not row:
-                return "Employee record not found."
-
-            current_balance = row[column]
-            if days <= 0:
-                return "Number of leave days must be at least 1."
-            if days > current_balance:
-                return f"Insufficient {label} balance. Available: {current_balance} days."
-
-            new_balance = current_balance - days
-            conn.execute(
-                f"UPDATE employees SET {column} = ? WHERE emp_id = ?",
-                (new_balance, emp_id),
-            )
+        new_balance = current - days
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE employees SET {col} = %s WHERE emp_id = %s",
+                    (new_balance, emp.emp_id),
+                )
             conn.commit()
-
-        return f"Approved! Deducted {days} day(s) from {label}. Remaining balance: {new_balance} days."
+        return f"Approved! {days} day(s) of {leave_type} deducted. Remaining {leave_type} balance: {new_balance} days."
