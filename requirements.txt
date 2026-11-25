@@ -15,3 +15,7 @@ pdf2image
 Pillow
 mcp
 langchain-mcp-adapters
+fastapi
+uvicorn
+python-multipart
+requests
