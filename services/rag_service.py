@@ -19,7 +19,7 @@ class HRChatService:
         self.llm = llm
 
     def upload_policy_document(self, filename: str, file_bytes: bytes) -> int:
-        """Index uploaded policy documents (including OCR) into ChromaDB."""
+        """Index uploaded policy documents (including OCR) into pgvector."""
         return self.policy_repo.index_uploaded_file(filename, file_bytes)
 
     async def _ask_mcp_agent(self, prompt_text: str, user: Employee) -> str:
@@ -30,6 +30,7 @@ class HRChatService:
                     "command": sys.executable,
                     "args": [MCP_SERVER_PATH],
                     "transport": "stdio",
+                    "env": dict(os.environ),
                 }
             }
         )
