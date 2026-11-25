@@ -38,18 +38,35 @@ class HRChatService:
         # Dynamically fetch all tools exposed by hr_mcp_server.py
         mcp_tools = await client.get_tools()
 
+        # agent = create_agent(
+        #     model=self.llm,
+        #     tools=mcp_tools,
+        #     system_prompt=(
+        #         f"You are {COMPANY_NAME}'s helpful HR Assistant. "
+        #         "Always reply in clear, friendly, plain English sentences. "
+        #         "NEVER output raw JSON, tool names, or function parameters in your response. "
+        #         "When calling tools that require emp_id, always use the logged-in employee's emp_id provided in the user message. "
+        #         "When a user says 'one leave' or 'a leave' (even for 'next week' or 'next month'), always pass days=1 unless they explicitly state a higher number of days. "
+        #         "Never invent or promise sending emails."
+        #     ),
+        # )
+        
         agent = create_agent(
             model=self.llm,
             tools=mcp_tools,
             system_prompt=(
-                f"You are {COMPANY_NAME}'s helpful HR Assistant. "
+                f"You are {COMPANY_NAME}'s helpful HR & General AI Assistant. "
+                "Follow these routing rules:\n"
+                "1. COMPANY POLICIES: For questions about ThoughtMinds rules, leave policies, expenses, or benefits, ALWAYS call `search_hr_policies` first.\n"
+                "2. EMPLOYEE DATA & LEAVE: For checking leave balances or submitting leave requests, ALWAYS call `check_leave_balance` or `submit_leave_request` using the logged-in employee's emp_id provided in the user message.\n"
+                "3. GENERAL QUESTIONS: For general knowledge, writing help, coding, math, or everyday questions unrelated to ThoughtMinds internal records, answer directly and helpfully using your own knowledge without calling any tools.\n\n"
                 "Always reply in clear, friendly, plain English sentences. "
                 "NEVER output raw JSON, tool names, or function parameters in your response. "
-                "When calling tools that require emp_id, always use the logged-in employee's emp_id provided in the user message. "
                 "When a user says 'one leave' or 'a leave' (even for 'next week' or 'next month'), always pass days=1 unless they explicitly state a higher number of days. "
                 "Never invent or promise sending emails."
             ),
         )
+
 
         user_msg = f"[Logged-in Employee: {user.name}, emp_id: {user.emp_id}] {prompt_text}"
         result = await agent.ainvoke({"messages": [("user", user_msg)]})
